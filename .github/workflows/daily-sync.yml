@@ -1,0 +1,38 @@
+name: Daily ingest, embed & rank
+
+on:
+  schedule:
+    - cron: "0 7 * * *" # 07:00 UTC daily — after the weekly discovery run's data has settled
+  workflow_dispatch: {}
+
+concurrency:
+  group: daily-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+
+      - name: Ingest README changes across tracked lists
+        run: bun run ingest
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Embed newly-ingested items
+        run: bun run embed
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Rank + generate personalized recommendations
+        run: bun run rank
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

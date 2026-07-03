@@ -1,0 +1,28 @@
+name: Discover awesome-lists
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch: {}
+
+concurrency:
+  group: discover
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run discover
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # The token GitHub auto-generates for this run — sufficient for
+          # read-only public API calls (search, README fetch) and raises
+          # the rate limit well above unauthenticated requests. No PAT needed.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

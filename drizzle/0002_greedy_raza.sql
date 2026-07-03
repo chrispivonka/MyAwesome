@@ -1,0 +1,2 @@
+ALTER TABLE "recommendation" ADD COLUMN "category" text DEFAULT '' NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "recommendation_user_id_item_id_idx" ON "recommendation" USING btree ("user_id","item_id");
