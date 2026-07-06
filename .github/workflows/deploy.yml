@@ -1,0 +1,48 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      # OIDC — no static AWS keys anywhere. The assumed role is scoped to
+      # this exact repo + the main branch (see the role's trust policy) and
+      # to this app's own resources (see its permissions policy).
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-west-2
+
+      # Secrets live in GitHub, SST stores them encrypted in AWS SSM — the
+      # repo never contains real values.
+      - name: Set SST secrets
+        run: |
+          bunx sst secret set DatabaseUrl "${{ secrets.DATABASE_URL }}" --stage production
+          bunx sst secret set GithubClientId "${{ secrets.OAUTH_CLIENT_ID }}" --stage production
+          bunx sst secret set GithubClientSecret "${{ secrets.OAUTH_CLIENT_SECRET }}" --stage production
+          bunx sst secret set AuthSecret "${{ secrets.AUTH_SECRET }}" --stage production
+          bunx sst secret set AnthropicApiKey "${{ secrets.ANTHROPIC_API_KEY }}" --stage production
+
+      - name: Deploy
+        run: bunx sst deploy --stage production

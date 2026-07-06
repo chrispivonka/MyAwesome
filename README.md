@@ -4,6 +4,7 @@ An AI-powered curator that transforms GitHub Awesome Lists and new tech
 releases into your own personalized discovery feed.
 
 [![CI](https://github.com/chrispivonka/MyAwesome/actions/workflows/ci.yml/badge.svg)](https://github.com/chrispivonka/MyAwesome/actions/workflows/ci.yml)
+[![Deploy](https://github.com/chrispivonka/MyAwesome/actions/workflows/deploy.yml/badge.svg)](https://github.com/chrispivonka/MyAwesome/actions/workflows/deploy.yml)
 [![Discover](https://github.com/chrispivonka/MyAwesome/actions/workflows/discover.yml/badge.svg)](https://github.com/chrispivonka/MyAwesome/actions/workflows/discover.yml)
 [![Daily Sync](https://github.com/chrispivonka/MyAwesome/actions/workflows/daily-sync.yml/badge.svg)](https://github.com/chrispivonka/MyAwesome/actions/workflows/daily-sync.yml)
 [![License: MIT](https://img.shields.io/github/license/chrispivonka/MyAwesome)](LICENSE)
@@ -97,53 +98,68 @@ Claude Haiku 4.5 via the Anthropic Batch API · GitHub Actions cron · AWS
 | Workflow | Trigger | What it does |
 |---|---|---|
 | [`ci.yml`](.github/workflows/ci.yml) | push to `main`, every PR | Lint, typecheck, and build — self-contained, no secrets required |
+| [`deploy.yml`](.github/workflows/deploy.yml) | push to `main` | Deploys to AWS via SST (see below) |
 | [`discover.yml`](.github/workflows/discover.yml) | weekly (Mondays) | Runs `bun run discover` |
 | [`daily-sync.yml`](.github/workflows/daily-sync.yml) | daily | Runs `bun run ingest` → `embed` → `rank` in sequence |
 
-All three are also manually runnable from the **Actions** tab
-(`workflow_dispatch`).
+All are also manually runnable from the **Actions** tab (`workflow_dispatch`).
 
-## Production deployment (AWS via SST v4)
+## Production deployment (AWS via SST v4, deployed by GitHub Actions)
 
 The app deploys to AWS as a Lambda function behind CloudFront, with static
-assets on S3 — all provisioned from [`sst.config.ts`](sst.config.ts).
+assets on S3 — provisioned from [`sst.config.ts`](sst.config.ts) and pushed
+by [`deploy.yml`](.github/workflows/deploy.yml) on every push to `main`.
+There are no static AWS keys anywhere: the workflow authenticates via
+GitHub's OIDC provider, assuming an IAM role scoped to this exact repo.
 
-1. Use [Neon](https://neon.tech) for Postgres (free tier, works from any
-   host) — enable the `vector` extension and run `bun run db:migrate`
-   against it once.
-2. Authenticate the AWS CLI locally (however your account is set up —
-   `aws sso login`, `aws configure`, etc.) so `aws sts get-caller-identity`
-   succeeds.
-3. Set secrets for the stage you're deploying (SST stores these encrypted
-   in AWS SSM, not in the repo):
-   ```sh
-   bunx sst secret set DatabaseUrl "<neon-connection-string>" --stage production
-   bunx sst secret set GithubClientId "<from the GitHub OAuth app>" --stage production
-   bunx sst secret set GithubClientSecret "<from the GitHub OAuth app>" --stage production
-   bunx sst secret set AuthSecret "$(openssl rand -base64 33)" --stage production
-   bunx sst secret set AnthropicApiKey "<your key>" --stage production
-   ```
-4. Deploy:
-   ```sh
-   bunx sst deploy --stage production
-   ```
-   This prints the CloudFront URL for the app.
-5. Create the GitHub OAuth App at
+**One-time setup** (already done for this repo, documented here for
+reproducibility):
+
+1. Create a Postgres database on [Neon](https://neon.tech) (free tier,
+   works from any host) — enable the `vector` extension and run
+   `bun run db:migrate` against it once.
+2. Create the OIDC deploy role in AWS IAM:
+   - Trust policy: allows `sts:AssumeRoleWithWebIdentity` from
+     `token.actions.githubusercontent.com`, restricted via
+     `token.actions.githubusercontent.com:sub` to
+     `repo:<owner>/<repo>:ref:refs/heads/main` — only pushes/dispatches on
+     `main` in this exact repo can assume it, not forks or other branches.
+   - Permissions: scoped to this app's own resources only (not a broad
+     managed policy) — Lambda functions, S3 buckets, and IAM roles/log
+     groups named `myawesome-*`, plus CloudFront (unavoidably
+     account-wide, since AWS assigns distribution IDs) and SSM parameters
+     under `/sst/*`. If `sst deploy` ever fails with `AccessDenied` for a
+     specific action, that's this scoping working as intended — add the
+     missing action rather than widening broadly.
+3. Add these as **repository secrets** (Settings → Secrets and variables →
+   Actions): `AWS_DEPLOY_ROLE_ARN`, `DATABASE_URL`, `OAUTH_CLIENT_ID`,
+   `OAUTH_CLIENT_SECRET`, `AUTH_SECRET`, `ANTHROPIC_API_KEY`. (Secret names
+   can't start with `GITHUB_`, hence `OAUTH_CLIENT_ID/SECRET` rather than
+   `GITHUB_CLIENT_ID/SECRET` — the workflow maps them to the
+   `GithubClientId`/`GithubClientSecret` SST secrets internally.)
+4. Push to `main` — `deploy.yml` sets the SST secrets from those GitHub
+   secrets and runs `bunx sst deploy --stage production`, printing the
+   CloudFront URL in the job output.
+5. **Chicken-and-egg step**: the GitHub OAuth App's callback URL needs
+   that CloudFront URL, so the very first deploy runs with placeholder
+   `OAUTH_CLIENT_ID`/`OAUTH_CLIENT_SECRET` values. Once you have the URL,
+   create the OAuth App at
    [github.com/settings/developers](https://github.com/settings/developers)
-   using that URL — homepage `https://<cloudfront-url>`, callback
-   `https://<cloudfront-url>/api/auth/callback/github` — then re-run the
-   `GithubClientId`/`GithubClientSecret` secret commands above with the
-   real values and redeploy.
-6. Set the same repo secrets as before for the `discover.yml` /
-   `daily-sync.yml` GitHub Actions workflows (**Settings → Secrets and
-   variables → Actions**): `DATABASE_URL`, `ANTHROPIC_API_KEY`.
+   (homepage `https://<cloudfront-url>`, callback
+   `https://<cloudfront-url>/api/auth/callback/github`), update the two
+   GitHub secrets with the real values, and push again (or re-run the
+   workflow) to redeploy with them.
+6. Set `DATABASE_URL` / `ANTHROPIC_API_KEY` as repo secrets too if not
+   already, for the `discover.yml` / `daily-sync.yml` workflows.
    (`GITHUB_TOKEN` is provided automatically — no PAT needed.)
 
-**Security notes**: enable MFA on the AWS account/IAM user doing the
-deploy; SST's `sst.Secret` values are stored encrypted in AWS SSM Parameter
-Store and never committed to the repo; `removal: "retain"` and
-`protect: true` are set for the `production` stage in `sst.config.ts` so a
-stray `sst remove` can't accidentally delete it.
+**Security notes**: the deploy role's trust policy only trusts this exact
+repo + branch, so a fork's PR can never assume it; its permissions policy
+is scoped to this app's own resources rather than a broad managed policy;
+SST's `sst.Secret` values live encrypted in AWS SSM, never in the repo;
+`removal: "retain"` and `protect: true` on the `production` stage in
+`sst.config.ts` mean a stray `sst remove` can't accidentally delete it;
+enable MFA on the AWS account itself as a baseline regardless.
 
 ## Cost
 
