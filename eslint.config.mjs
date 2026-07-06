@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // SST's generated platform types + the required triple-slash
+    // reference convention in sst.config.ts — not our code.
+    ".sst/**",
+    "sst.config.ts",
   ]),
 ]);
 

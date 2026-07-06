@@ -1,7 +1,6 @@
 import NextAuth from "next-auth";
 import GitHub from "next-auth/providers/github";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
-import { after } from "next/server";
 import { db } from "@/lib/db";
 import {
   accounts,
@@ -29,6 +28,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }),
   ],
   session: { strategy: "database" },
+  // Not hosted on Vercel (which auto-trusts the host via a detected env
+  // var) — trust the host explicitly so callback URL validation works on
+  // any platform.
+  trustHost: true,
   callbacks: {
     session({ session, user }) {
       session.user.id = user.id;
@@ -36,12 +39,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
   },
   events: {
-    signIn({ user }) {
-      // Runs after the sign-in response is sent (Vercel keeps the function
-      // alive for this) so login doesn't wait on GitHub API calls + local
-      // embedding inference.
+    async signIn({ user }) {
+      // Awaited (not fire-and-forget) so it works the same on every host —
+      // background work after a response is sent isn't reliable on all
+      // serverless runtimes the way it is on Vercel. Adds a few seconds to
+      // first sign-in (GitHub API call + local embedding inference).
       if (user.id) {
-        after(() => buildProfileForUser(user.id!).catch(console.error));
+        await buildProfileForUser(user.id).catch(console.error);
       }
     },
   },

@@ -45,7 +45,8 @@ Designed to run for ~$0/month — see [Cost](#cost) below.
 
 Bun · Next.js 16 · Tailwind v4 + shadcn/ui · Postgres (pgvector) + Drizzle ·
 Auth.js (GitHub OAuth) · Octokit · local embeddings via Transformers.js ·
-Claude Haiku 4.5 via the Anthropic Batch API · GitHub Actions cron
+Claude Haiku 4.5 via the Anthropic Batch API · GitHub Actions cron · AWS
+(Lambda + CloudFront + S3) via SST v4
 
 ## Local setup
 
@@ -102,27 +103,60 @@ Claude Haiku 4.5 via the Anthropic Batch API · GitHub Actions cron
 All three are also manually runnable from the **Actions** tab
 (`workflow_dispatch`).
 
-## Production deployment
+## Production deployment (AWS via SST v4)
 
-- Host the app on [Vercel](https://vercel.com) (Hobby tier is free).
-- Use [Neon](https://neon.tech) for Postgres (free tier) — enable the
-  `vector` extension and run `bun run db:migrate` against it once.
-- Add the same env vars as `.env.local` (with real values) to the Vercel
-  project, plus these repo secrets for the `discover.yml` / `daily-sync.yml`
-  workflows (**Settings → Secrets and variables → Actions**):
-  - `DATABASE_URL`
-  - `ANTHROPIC_API_KEY`
+The app deploys to AWS as a Lambda function behind CloudFront, with static
+assets on S3 — all provisioned from [`sst.config.ts`](sst.config.ts).
 
-  (`GITHUB_TOKEN` is provided automatically by GitHub Actions — no PAT needed.)
+1. Use [Neon](https://neon.tech) for Postgres (free tier, works from any
+   host) — enable the `vector` extension and run `bun run db:migrate`
+   against it once.
+2. Authenticate the AWS CLI locally (however your account is set up —
+   `aws sso login`, `aws configure`, etc.) so `aws sts get-caller-identity`
+   succeeds.
+3. Set secrets for the stage you're deploying (SST stores these encrypted
+   in AWS SSM, not in the repo):
+   ```sh
+   bunx sst secret set DatabaseUrl "<neon-connection-string>" --stage production
+   bunx sst secret set GithubClientId "<from the GitHub OAuth app>" --stage production
+   bunx sst secret set GithubClientSecret "<from the GitHub OAuth app>" --stage production
+   bunx sst secret set AuthSecret "$(openssl rand -base64 33)" --stage production
+   bunx sst secret set AnthropicApiKey "<your key>" --stage production
+   ```
+4. Deploy:
+   ```sh
+   bunx sst deploy --stage production
+   ```
+   This prints the CloudFront URL for the app.
+5. Create the GitHub OAuth App at
+   [github.com/settings/developers](https://github.com/settings/developers)
+   using that URL — homepage `https://<cloudfront-url>`, callback
+   `https://<cloudfront-url>/api/auth/callback/github` — then re-run the
+   `GithubClientId`/`GithubClientSecret` secret commands above with the
+   real values and redeploy.
+6. Set the same repo secrets as before for the `discover.yml` /
+   `daily-sync.yml` GitHub Actions workflows (**Settings → Secrets and
+   variables → Actions**): `DATABASE_URL`, `ANTHROPIC_API_KEY`.
+   (`GITHUB_TOKEN` is provided automatically — no PAT needed.)
+
+**Security notes**: enable MFA on the AWS account/IAM user doing the
+deploy; SST's `sst.Secret` values are stored encrypted in AWS SSM Parameter
+Store and never committed to the repo; `removal: "retain"` and
+`protect: true` are set for the `production` stage in `sst.config.ts` so a
+stray `sst remove` can't accidentally delete it.
 
 ## Cost
 
-Vercel Hobby, Neon free tier, GitHub Actions cron, and local embeddings are
-all $0. The only real cost is the Haiku ranking pass, which is deliberately
-kept tiny: pgvector pre-filters to ~150 candidates before any LLM call, it
-runs through the 50%-off Batch API, and the shared instructions are prompt-
-cached. Expect low cents/month for personal use — turn down `RANK_SHORTLIST_SIZE`
-or the ranking cadence if you want it even lower.
+Neon free tier, GitHub Actions cron, and local embeddings are all $0.
+AWS Lambda's free tier (1M requests + 400,000 GB-seconds/month) doesn't
+expire, and CloudFront/S3 usage at this traffic level (one person
+occasionally checking a feed) stays well under a dollar a month even after
+their 12-month free tier lapses. The only real cost is the Haiku ranking
+pass, which is deliberately kept tiny: pgvector pre-filters to ~150
+candidates before any LLM call, it runs through the 50%-off Batch API, and
+the shared instructions are prompt-cached. Expect low cents/month for
+personal use — turn down `RANK_SHORTLIST_SIZE` or the ranking cadence if
+you want it even lower.
 
 ## License
 
