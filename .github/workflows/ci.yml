@@ -24,6 +24,10 @@ jobs:
         with:
           bun-version: latest
       - run: bun install --frozen-lockfile
+      # Generates .sst/platform/config.d.ts (referenced by sst.config.ts) —
+      # a local codegen step based on the config's providers, no AWS
+      # credentials needed.
+      - run: bunx sst install
       - run: bun run lint
       - run: bunx tsc --noEmit
       - run: bun run build
