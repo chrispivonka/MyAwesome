@@ -17,8 +17,13 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      # SST shells out to npm internally to install OpenNext build tooling;
+      # this silences its deprecation-warning noise (uuid@9, glob@9, etc.)
+      # without hiding actual errors.
+      NPM_CONFIG_LOGLEVEL: error
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -29,7 +34,7 @@ jobs:
       # OIDC — no static AWS keys anywhere. The assumed role is scoped to
       # this exact repo + the main branch (see the role's trust policy) and
       # to this app's own resources (see its permissions policy).
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: us-west-2

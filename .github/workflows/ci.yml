@@ -18,8 +18,9 @@ jobs:
       # just satisfies the "DATABASE_URL is not set" guard so the Next.js
       # build can evaluate route modules. No secrets required for CI.
       DATABASE_URL: "postgresql://user:pass@localhost:5432/db"
+      NPM_CONFIG_LOGLEVEL: error
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
