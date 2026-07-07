@@ -2,7 +2,6 @@ import { Octokit } from "octokit";
 import { eq, and } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { accounts, githubProfiles } from "@/lib/db/schema";
-import { embed } from "@/lib/ai/embed";
 
 const STAR_PAGES = 3; // 3 * 100 = up to 300 most-recent stars
 const TOP_LANGUAGES = 8;
@@ -76,8 +75,12 @@ export async function buildProfileForUser(userId: string): Promise<void> {
     .filter(Boolean)
     .join(" ");
 
-  const profileEmbedding = profileText ? await embed(profileText) : null;
-
+  // No embedding here: this runs inside the deployed Lambda, and the local
+  // ONNX embedding model's native dependencies (onnxruntime-node, sharp)
+  // bundle in at ~200MB+ across all platforms, blowing past Lambda's hard
+  // 250MB unzipped limit. `profileEmbedding` stays null until the next
+  // daily-sync GitHub Actions run backfills it (runs on a normal Linux
+  // runner with no such constraint) — see scripts/rank.ts.
   await db
     .insert(githubProfiles)
     .values({
@@ -85,11 +88,10 @@ export async function buildProfileForUser(userId: string): Promise<void> {
       starredLangs,
       starredTopics,
       profileText,
-      profileEmbedding,
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
       target: githubProfiles.userId,
-      set: { starredLangs, starredTopics, profileText, profileEmbedding, updatedAt: new Date() },
+      set: { starredLangs, starredTopics, profileText, updatedAt: new Date() },
     });
 }

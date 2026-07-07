@@ -24,14 +24,10 @@ export default $config({
         AUTH_SECRET: authSecret.value,
         ANTHROPIC_API_KEY: anthropicApiKey.value,
       },
-      server: {
-        // The GitHub OAuth callback awaits profile building (starred-repo
-        // fetch + local embedding inference) synchronously — give it
-        // headroom. 60s is also CloudFront's hard cap without an AWS
-        // support ticket, so there's no benefit going higher.
-        timeout: "60 seconds",
-        memory: "2048 MB",
-      },
+      // Defaults (20s / 1024MB) are plenty — the OAuth callback only does
+      // a few Octokit calls + a DB write now. Profile *embedding* runs via
+      // the daily-sync GitHub Actions workflow instead, not in this Lambda
+      // (its native ONNX deps don't fit in Lambda's 250MB unzipped limit).
     });
 
     return {

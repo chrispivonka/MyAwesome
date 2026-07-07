@@ -42,8 +42,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async signIn({ user }) {
       // Awaited (not fire-and-forget) so it works the same on every host —
       // background work after a response is sent isn't reliable on all
-      // serverless runtimes the way it is on Vercel. Adds a few seconds to
-      // first sign-in (GitHub API call + local embedding inference).
+      // serverless runtimes the way it is on Vercel. Fetches starred
+      // repos/languages/topics only; profile *embedding* happens later via
+      // the daily-sync GitHub Actions workflow, not in this Lambda.
       if (user.id) {
         await buildProfileForUser(user.id).catch(console.error);
       }

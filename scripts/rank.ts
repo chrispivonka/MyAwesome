@@ -1,7 +1,9 @@
+import { eq, isNull } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { githubProfiles, recommendations } from "@/lib/db/schema";
 import { anthropic, buildBatchRequest, parseScoreResult, type RankCandidate } from "@/lib/ai/rank";
+import { embed } from "@/lib/ai/embed";
 
 const SHORTLIST_SIZE = Number(process.env.RANK_SHORTLIST_SIZE ?? 150);
 const CHUNK_SIZE = 25;
@@ -36,7 +38,28 @@ function chunk<T>(items: T[], size: number): T[][] {
   return out;
 }
 
+async function backfillMissingEmbeddings(): Promise<void> {
+  const pending = await db
+    .select({ userId: githubProfiles.userId, profileText: githubProfiles.profileText })
+    .from(githubProfiles)
+    .where(isNull(githubProfiles.profileEmbedding));
+
+  if (pending.length === 0) return;
+  console.log(`Embedding ${pending.length} profile(s) missing a vector...`);
+
+  for (const { userId, profileText } of pending) {
+    if (!profileText) continue;
+    const profileEmbedding = await embed(profileText);
+    await db
+      .update(githubProfiles)
+      .set({ profileEmbedding })
+      .where(eq(githubProfiles.userId, userId));
+  }
+}
+
 async function main() {
+  await backfillMissingEmbeddings();
+
   const profiles = await db.select().from(githubProfiles);
   console.log(`Ranking for ${profiles.length} user(s)...`);
 
