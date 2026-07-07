@@ -22,6 +22,7 @@ jobs:
       # this silences its deprecation-warning noise (uuid@9, glob@9, etc.)
       # without hiding actual errors.
       NPM_CONFIG_LOGLEVEL: error
+      NEXT_TELEMETRY_DISABLED: "1"
     steps:
       - uses: actions/checkout@v7
 

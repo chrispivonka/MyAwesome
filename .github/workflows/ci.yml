@@ -19,6 +19,7 @@ jobs:
       # build can evaluate route modules. No secrets required for CI.
       DATABASE_URL: "postgresql://user:pass@localhost:5432/db"
       NPM_CONFIG_LOGLEVEL: error
+      NEXT_TELEMETRY_DISABLED: "1"
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
